@@ -1,3 +1,6 @@
+use egui_extras::RetainedImage;
+use poll_promise::Promise;
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -8,6 +11,9 @@ pub struct TemplateApp {
     // this how you opt-out of serialization of a member
     #[serde(skip)]
     value: f32,
+
+    #[serde(skip)]
+    promise: Option<Promise<ehttp::Result<RetainedImage>>>,
 }
 
 impl Default for TemplateApp {
@@ -16,6 +22,7 @@ impl Default for TemplateApp {
             // Example stuff:
             label: "Hello World!".to_owned(),
             value: 2.7,
+            promise: None
         }
     }
 }
@@ -45,7 +52,7 @@ impl eframe::App for TemplateApp {
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let Self { label, value } = self;
+        let Self { label, value, .. } = self;
 
         // Examples of how to create different panels and windows.
         // Pick whichever suits you.
@@ -112,5 +119,45 @@ impl eframe::App for TemplateApp {
                 ui.label("You would normally choose either panels OR windows.");
             });
         }
+
+        let promise = self.promise.get_or_insert_with(|| {
+            // Begin download.
+            // We download the image using `ehttp`, a library that works both in WASM and on native.
+            // We use the `poll-promise` library to communicate with the UI thread.
+            let ctx = ctx.clone();
+            let (sender, promise) = Promise::new();
+            let request = ehttp::Request::get("https://picsum.photos/seed/1.759706314/1024");
+            ehttp::fetch(request, move |response| {
+                let image = response.and_then(parse_response);
+                sender.send(image); // send the results back to the UI thread.
+                ctx.request_repaint(); // wake up UI thread
+            });
+            promise
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| match promise.ready() {
+            None => {
+                ui.spinner(); // still loading
+            }
+            Some(Err(err)) => {
+                ui.colored_label(ui.visuals().error_fg_color, err); // something went wrong
+            }
+            Some(Ok(image)) => {
+                image.show_max_size(ui, ui.available_size());
+            }
+        });
+    }
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn parse_response(response: ehttp::Response) -> Result<RetainedImage, String> {
+    let content_type = response.content_type().unwrap_or_default();
+    if content_type.starts_with("image/") {
+        RetainedImage::from_image_bytes(&response.url, &response.bytes)
+    } else {
+        Err(format!(
+            "Expected image, found content-type {:?}",
+            content_type
+        ))
     }
 }
