@@ -12,7 +12,7 @@ impl Gallery {
     pub fn new() -> Self {
         let image_size = 32.0;
         let images = vec![
-            WebImage::new(format!("http://{}:8000/merged_canvas.698a8989.png", ADDRESS)),
+            WebImage::new(format!("http://{}:8000/DSC_0008.JPG", ADDRESS)),
             WebImage::new(format!("http://{}:8000/000051.bb94bc2c.3538291841.png", ADDRESS))
         ];
         let selection = None;
